@@ -264,7 +264,23 @@ node_modules/`);
         groupPolicy: 'allowlist',
         streamMode: 'partial'
       };
+
+      // Add binding to route this Telegram account to the agent
+      if (!config.bindings) config.bindings = [];
+      const hasBinding = config.bindings.some(
+        b => b.agentId === id && b.match?.channel === 'telegram' && b.match?.accountId === id
+      );
+      if (!hasBinding) {
+        config.bindings.push({
+          agentId: id,
+          match: { channel: 'telegram', accountId: id }
+        });
+      }
     }
+
+    // Ensure agent sessions directory exists (gateway needs it)
+    const agentSessionsDir = join(process.env.HOME, '.clawdbot', 'agents', id, 'sessions');
+    mkdirSync(agentSessionsDir, { recursive: true });
 
     // Enable agent-to-agent messaging
     if (!config.tools) config.tools = {};
