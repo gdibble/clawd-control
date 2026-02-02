@@ -1198,7 +1198,7 @@ const server = createServer((req, res) => {
   // ── Crons ──
   if (path === '/api/crons' && req.method === 'GET') {
     try {
-      const configPath = join(homedir(), '.clawdbot', 'clawdbot.json');
+      const configPath = join(process.env.HOME, '.clawdbot', 'clawdbot.json');
       if (!existsSync(configPath)) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Config not found' }));
@@ -1217,8 +1217,7 @@ const server = createServer((req, res) => {
 
       // Proxy to gateway API
       const gatewayUrl = `http://127.0.0.1:${port}/api/cron/list`;
-      const { request } = await import('http');
-      const gatewayReq = request(gatewayUrl, {
+      const gatewayReq = http.request(gatewayUrl, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
