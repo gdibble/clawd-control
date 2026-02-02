@@ -358,6 +358,11 @@ document.addEventListener('layout:snapshot', () => {
   loadAnalytics();
 });
 
+// Also load immediately — don't wait for SSE snapshot
+setTimeout(() => {
+  if (!analyticsData) loadAnalytics();
+}, 500);
+
 function populateAgentSelect() {
   const select = $('#agentSelect');
   const ids = Object.keys(agentState).sort();
