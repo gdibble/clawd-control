@@ -1198,7 +1198,8 @@ const server = createServer((req, res) => {
   // ── Crons ──
   if (path === '/api/crons' && req.method === 'GET') {
     try {
-      const output = execFileSync('clawdbot', ['cron', 'list', '--json'], { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+      const clawdbotBin = join(process.execPath, '..', 'clawdbot');
+      const output = execFileSync(clawdbotBin, ['cron', 'list', '--json'], { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(output);
     } catch (e) {
