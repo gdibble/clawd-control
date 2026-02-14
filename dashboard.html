@@ -477,6 +477,7 @@ function buildAgentHTML(id, a, health) {
   const badgeLabel = a.online ? (health.level === 'healthy' ? '● Healthy' : (health.level === 'degraded' ? '◐ Degraded' : '○ Idle')) : '○ Offline';
   const model = extractModel(a);
   const sessCount = extractSessionCount(a);
+  const skillsCount = a.skillsCount !== undefined ? a.skillsCount : '—';
   const channels = extractChannels(a);
   const sessions = extractSessions(a);
   const cronJobs = extractCronCount(a);
@@ -501,6 +502,10 @@ function buildAgentHTML(id, a, health) {
     <div class="metrics-row">
       <div class="metric"><div class="metric-label">Model</div><div class="metric-value" style="font-size:0.78rem">${model}</div></div>
       <div class="metric"><div class="metric-label">Sessions</div><div class="metric-value">${sessCount}</div></div>
+    </div>
+    <div class="metrics-row">
+      <div class="metric"><div class="metric-label">Skills</div><div class="metric-value">${skillsCount}</div></div>
+      <div class="metric"><div class="metric-label">Cron Jobs</div><div class="metric-value">${cronJobs}</div></div>
     </div>`;
 
   if (ctxPct !== null) {
@@ -559,6 +564,7 @@ function buildCompactHTML(id, a, health) {
   const badgeLabel = a.online ? (health.level === 'healthy' ? '●' : (health.level === 'degraded' ? '◐' : '○')) : '○';
   const model = extractModel(a);
   const sessCount = extractSessionCount(a);
+  const skillsCount = a.skillsCount !== undefined ? a.skillsCount : '—';
   const hbState = getHeartbeatState(a);
   const sessions = extractSessions(a);
   const mainSess = sessions.find(s => s.key?.endsWith(':main') || s.label === 'main');
@@ -576,6 +582,8 @@ function buildCompactHTML(id, a, health) {
       <span><strong>${model}</strong></span>
       <span class="sep">•</span>
       <span>${sessCount} session${sessCount !== 1 && sessCount !== '—' ? 's' : ''}</span>
+      <span class="sep">•</span>
+      <span>${skillsCount} skill${skillsCount !== 1 && skillsCount !== '—' ? 's' : ''}</span>
       <span class="sep">•</span>
       <span>HB ${hbState === 'enabled' ? '✓' : '✗'}</span>`;
 

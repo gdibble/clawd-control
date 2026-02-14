@@ -310,6 +310,53 @@ function safeRun(fn) {
   catch (e) { return [{ name: 'Check failed', status: 'fail', detail: e.message }]; }
 }
 
+// ── Skills Counter (lightweight, for snapshot) ─────────
+function getSkillsCount(agentId) {
+  const agentConfig = collector.config?.agents?.find(a => a.id === agentId);
+  if (!agentConfig) return 0;
+  
+  const ws = agentConfig.workspace;
+  const homeDir = process.env.HOME || '/Users/openclaw';
+  
+  const countSkillsDir = (dir) => {
+    if (!existsSync(dir)) return 0;
+    try {
+      return readdirSync(dir).filter(f => {
+        try { return statSync(join(dir, f)).isDirectory(); } catch { return false; }
+      }).length;
+    } catch { return 0; }
+  };
+  
+  const localCount = countSkillsDir(join(ws, 'skills'));
+  const globalCount = countSkillsDir(join(homeDir, '.openclaw', 'skills'));
+  
+  // Return unique count (some skills might be in both)
+  const localSkills = new Set();
+  const globalSkills = new Set();
+  
+  try {
+    const localDir = join(ws, 'skills');
+    if (existsSync(localDir)) {
+      readdirSync(localDir).forEach(f => {
+        try { if (statSync(join(localDir, f)).isDirectory()) localSkills.add(f); } catch {}
+      });
+    }
+  } catch {}
+  
+  try {
+    const globalDir = join(homeDir, '.openclaw', 'skills');
+    if (existsSync(globalDir)) {
+      readdirSync(globalDir).forEach(f => {
+        try { if (statSync(join(globalDir, f)).isDirectory()) globalSkills.add(f); } catch {}
+      });
+    }
+  } catch {}
+  
+  // Combine both sets for unique count
+  const allSkills = new Set([...localSkills, ...globalSkills]);
+  return allSkills.size;
+}
+
 // ── Agent Detail Reader ─────────────────────────────
 function getAgentDetail(agentId) {
   const agentConfig = collector.config?.agents?.find(a => a.id === agentId);
@@ -1266,8 +1313,15 @@ const server = createServer((req, res) => {
   // ── API Routes ──
 
   if (path === '/api/snapshot') {
+    const snapshot = collector.getSnapshot();
+    // Enrich with skills count for each agent
+    if (snapshot.agents) {
+      for (const [id, agent] of Object.entries(snapshot.agents)) {
+        agent.skillsCount = getSkillsCount(id);
+      }
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(collector.getSnapshot()));
+    res.end(JSON.stringify(snapshot));
     return;
   }
 
