@@ -77,6 +77,7 @@ export class AgentCollector extends EventEmitter {
           machine: agent.machine, online: false, lastSeen: null,
           health: null, sessions: null, usage: null, heartbeat: null,
           presence: null, channels: null, cron: null, error: null,
+          healthHistory: [], // Track last 24 connection status checks (1 per poll)
         });
       }
     }
@@ -304,7 +305,21 @@ export class AgentCollector extends EventEmitter {
 
   _updateState(id, partial) {
     const current = this.state.get(id) || {};
-    this.state.set(id, { ...current, ...partial });
+    const updated = { ...current, ...partial };
+    
+    // Track health history (last 24 status checks)
+    if (partial.online !== undefined || partial.error !== undefined) {
+      const history = updated.healthHistory || [];
+      const status = updated.online ? 'ok' : 'fail';
+      const ts = Date.now();
+      history.push({ ts, status });
+      
+      // Keep only last 24 entries
+      if (history.length > 24) history.shift();
+      updated.healthHistory = history;
+    }
+    
+    this.state.set(id, updated);
     this.emit('update', { id, state: this.state.get(id) });
   }
 

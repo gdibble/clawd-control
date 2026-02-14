@@ -224,6 +224,18 @@
 .last-seen { margin-top: 6px; font-size: 0.65rem; color: var(--text-tertiary); }
 .error-text { color: var(--error); font-size: 0.7rem; margin-top: 4px; font-style: italic; }
 
+/* Health History Sparkline */
+.health-sparkline {
+  display: flex; gap: 2px; height: 16px; align-items: flex-end;
+  margin: 6px 0; padding: 2px 0;
+}
+.sparkline-bar {
+  flex: 1; min-width: 2px; border-radius: 1px; transition: all 0.3s;
+  background: var(--border-subtle);
+}
+.sparkline-bar.ok { background: var(--success); }
+.sparkline-bar.fail { background: var(--error); opacity: 0.6; }
+
 .empty-state { text-align: center; padding: 60px 24px; color: var(--text-secondary); }
 .empty-state .icon { font-size: 2rem; margin-bottom: 12px; opacity: 0.4; }
 .empty-state p { font-size: 0.85rem; }
@@ -551,6 +563,17 @@ function buildAgentHTML(id, a, health) {
       </button>
     </div>`;
 
+  // Health history sparkline
+  if (a.healthHistory && a.healthHistory.length > 0) {
+    html += `<div class="health-sparkline">`;
+    for (const h of a.healthHistory) {
+      const cls = h.status === 'ok' ? 'ok' : 'fail';
+      const title = `${new Date(h.ts).toLocaleString()}: ${h.status}`;
+      html += `<div class="sparkline-bar ${cls}" title="${title}"></div>`;
+    }
+    html += `</div>`;
+  }
+
   if (a.lastSeen) html += `<div class="last-seen">Last seen: ${timeAgo(a.lastSeen)}</div>`;
   return html;
 }
@@ -599,6 +622,17 @@ function buildCompactHTML(id, a, health) {
   if (ctxPct !== null) {
     const cls = ctxPct > 80 ? 'crit' : ctxPct > 60 ? 'warn' : 'ok';
     html += `<div class="context-bar"><span class="context-label">${ctxPct}%</span><div class="context-track"><div class="context-fill bar-fill ${cls}" style="width:${ctxPct}%"></div></div></div>`;
+  }
+
+  // Health history sparkline
+  if (a.healthHistory && a.healthHistory.length > 0) {
+    html += `<div class="health-sparkline">`;
+    for (const h of a.healthHistory) {
+      const cls = h.status === 'ok' ? 'ok' : 'fail';
+      const title = `${new Date(h.ts).toLocaleString()}: ${h.status}`;
+      html += `<div class="sparkline-bar ${cls}" title="${title}"></div>`;
+    }
+    html += `</div>`;
   }
 
   if (a.lastSeen) html += `<div class="last-seen">${timeAgo(a.lastSeen)}</div>`;

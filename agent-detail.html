@@ -308,6 +308,94 @@
     background: rgba(34, 197, 94, 0.08);
   }
 
+  /* Memory Timeline */
+  .memory-timeline {
+    position: relative;
+    padding-left: 32px;
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .timeline-item:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  .timeline-marker {
+    position: absolute;
+    left: -32px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg-secondary);
+    box-shadow: 0 0 0 2px var(--accent-bg);
+  }
+  .timeline-marker::before {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 12px;
+    width: 2px;
+    height: 100px;
+    background: var(--border-subtle);
+  }
+  .timeline-item:last-child .timeline-marker::before {
+    display: none;
+  }
+  .timeline-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    padding: 8px 0;
+    transition: opacity 150ms;
+  }
+  .timeline-header:hover {
+    opacity: 0.8;
+  }
+  .timeline-date {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--accent);
+    min-width: 100px;
+  }
+  .timeline-title {
+    flex: 1;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+  }
+  .timeline-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+  }
+  .timeline-expand-icon {
+    transition: transform 200ms;
+    font-size: 10px;
+  }
+  .timeline-item.expanded .timeline-expand-icon {
+    transform: rotate(-180deg);
+  }
+  .timeline-preview {
+    display: none;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .timeline-item.expanded .timeline-preview {
+    display: block;
+  }
+
   /* Empty State */
   .empty { 
     color: var(--text-secondary); 
@@ -648,6 +736,7 @@ function renderMemory() {
       <h2><i data-lucide="brain"></i> MEMORY.md (Long-Term)</h2>
       ${ws.memory ? `<div class="md-content">${esc(ws.memory)}</div>` : '<div class="empty">Empty</div>'}
     </div>
+    ${data.recentNotes.length > 0 ? renderMemoryTimeline() : ''}
     <div class="panel">
       <h2><i data-lucide="folder"></i> Memory Files (${data.memoryFiles.length})</h2>
       ${data.memoryFiles.length > 0 ? `<ul class="file-list">` +
@@ -665,6 +754,40 @@ function renderMemory() {
     <div class="panel">
       <h2><i data-lucide="wrench"></i> TOOLS.md</h2>
       ${ws.tools ? `<div class="md-content">${esc(ws.tools)}</div>` : '<div class="empty">No tools config</div>'}
+    </div>
+  `;
+}
+
+function renderMemoryTimeline() {
+  return `
+    <div class="panel">
+      <h2><i data-lucide="timeline"></i> Recent Memory Timeline</h2>
+      <div style="font-size:0.7rem;color:var(--text-tertiary);margin-bottom:16px">Latest daily notes and memory entries</div>
+      <div class="memory-timeline">
+        ${data.recentNotes.map((note, i) => {
+          const date = new Date(note.modified);
+          const formattedDate = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          const hasContent = note.content && note.content.trim().length > 0;
+          return `
+            <div class="timeline-item" id="timeline-${i}">
+              <div class="timeline-marker"></div>
+              <div class="timeline-content">
+                <div class="timeline-header" onclick="document.getElementById('timeline-${i}').classList.toggle('expanded')">
+                  <div class="timeline-date">${formattedDate}</div>
+                  <div class="timeline-title">${esc(note.name)}</div>
+                  <div class="timeline-meta">
+                    <span>${fmtBytes(note.size)}</span>
+                    <span class="timeline-expand-icon">▼</span>
+                  </div>
+                </div>
+                <div class="timeline-preview">
+                  ${hasContent ? `<div class="md-content" style="max-height:400px">${esc(note.content)}</div>` : '<div class="empty">Empty file</div>'}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
     </div>
   `;
 }
