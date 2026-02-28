@@ -1458,6 +1458,152 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // ── Shared Context ──
+  if (path === '/api/shared-context' && req.method === 'GET') {
+    try {
+      const scDir = join(process.env.HOME || '/Users/openclaw', 'shared-context');
+      const files = [];
+      if (existsSync(scDir)) {
+        for (const f of readdirSync(scDir).filter(f => f.endsWith('.md')).sort()) {
+          const fp = join(scDir, f);
+          const st = statSync(fp);
+          const content = readFileSync(fp, 'utf8');
+          files.push({ name: f, content, size: st.size, modified: st.mtime.toISOString() });
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ files }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      console.error('[API] /api/shared-context error:', e.message);
+      res.end(JSON.stringify({ error: 'Failed to read shared context' }));
+    }
+    return;
+  }
+
+  // ── Operations Overview ──
+  if (path === '/api/operations' && req.method === 'GET') {
+    try {
+      const agents = (collector.config?.agents || []).map(agentConfig => {
+        const ws = agentConfig.workspace;
+        const id = agentConfig.id;
+
+        const safeReadOps = (file) => {
+          const p = join(ws, file);
+          if (!existsSync(p)) return null;
+          try { return readFileSync(p, 'utf8'); } catch { return null; }
+        };
+
+        const safeStatOps = (file) => {
+          const p = join(ws, file);
+          if (!existsSync(p)) return null;
+          try { return statSync(p); } catch { return null; }
+        };
+
+        // Read key files
+        const soul = safeReadOps('SOUL.md');
+        const memory = safeReadOps('MEMORY.md');
+        const heartbeat = safeReadOps('HEARTBEAT.md');
+        const activeWork = safeReadOps('ACTIVE_WORK.md');
+        const tasks = safeReadOps('TASKS.md');
+        const identity = safeReadOps('IDENTITY.md');
+
+        // SOUL line count
+        const soulLineCount = soul ? soul.split('\n').length : 0;
+        const soulStat = safeStatOps('SOUL.md');
+
+        // MEMORY size
+        const memoryStat = safeStatOps('MEMORY.md');
+        const memoryBytes = memoryStat ? memoryStat.size : 0;
+
+        // memory/ dir stats
+        let memoryFileCount = 0;
+        let memoryTotalBytes = 0;
+        const memDir = join(ws, 'memory');
+        if (existsSync(memDir)) {
+          try {
+            const files = readdirSync(memDir).filter(f => !f.startsWith('.'));
+            memoryFileCount = files.length;
+            for (const f of files) {
+              try { memoryTotalBytes += statSync(join(memDir, f)).size; } catch {}
+            }
+          } catch {}
+        }
+
+        // Cron count from collector
+        const liveState = collector.state.get(id) || {};
+        const lastActivity = liveState.lastSeen || liveState.updatedAt || null;
+        const cronCount = liveState.crons?.length || 0;
+        const model = liveState.model || agentConfig.model || 'unknown';
+
+        // Active work summary (first 3 lines)
+        let activeWorkSummary = null;
+        if (activeWork) {
+          activeWorkSummary = activeWork.split('\n').filter(l => l.trim()).slice(0, 3).join('\n');
+        }
+
+        // Build alerts
+        const alerts = [];
+        const now = Date.now();
+        const hourMs = 3600000;
+
+        if (soulLineCount > 60) {
+          alerts.push({ type: 'bloated', severity: 'warning', message: `SOUL.md is ${soulLineCount} lines (target: <60)` });
+        }
+        if (memoryBytes > 3000) {
+          alerts.push({ type: 'bloated', severity: 'warning', message: `MEMORY.md is ${(memoryBytes / 1024).toFixed(1)}KB (target: <3KB)` });
+        }
+        if (memoryTotalBytes > 50000) {
+          alerts.push({ type: 'bloated', severity: 'warning', message: `memory/ dir is ${(memoryTotalBytes / 1024).toFixed(0)}KB total` });
+        }
+        if (!heartbeat) {
+          alerts.push({ type: 'missing', severity: 'info', message: 'No HEARTBEAT.md' });
+        }
+        if (lastActivity) {
+          const idleHours = (now - new Date(lastActivity).getTime()) / hourMs;
+          if (idleHours > 48) {
+            alerts.push({ type: 'idle', severity: 'critical', message: `Idle ${Math.floor(idleHours)}h (>48h)` });
+          } else if (idleHours > 24) {
+            alerts.push({ type: 'idle', severity: 'warning', message: `Idle ${Math.floor(idleHours)}h (>24h)` });
+          }
+        }
+
+        // File health details
+        const fileHealth = {
+          'SOUL.md': { exists: !!soul, lines: soulLineCount, bytes: soulStat?.size || 0, modified: soulStat?.mtime?.toISOString() },
+          'MEMORY.md': { exists: !!memory, bytes: memoryBytes, modified: memoryStat?.mtime?.toISOString() },
+          'HEARTBEAT.md': { exists: !!heartbeat, bytes: heartbeat?.length || 0 },
+          'ACTIVE_WORK.md': { exists: !!activeWork, bytes: activeWork?.length || 0 },
+          'TASKS.md': { exists: !!tasks, bytes: tasks?.length || 0 },
+          'IDENTITY.md': { exists: !!identity, bytes: identity?.length || 0 },
+        };
+
+        return {
+          id, name: agentConfig.name, emoji: agentConfig.emoji,
+          model, lastActivity, activeWorkSummary, cronCount,
+          soulLineCount, memoryBytes, memoryTotalBytes, memoryFileCount,
+          alerts, fileHealth,
+          hasHeartbeat: !!heartbeat,
+          hasTasks: !!tasks,
+          hasActiveWork: !!activeWork,
+        };
+      });
+
+      // Global alert summary
+      const totalAlerts = agents.reduce((sum, a) => sum + a.alerts.length, 0);
+      const criticalAlerts = agents.reduce((sum, a) => sum + a.alerts.filter(al => al.severity === 'critical').length, 0);
+      const warningAlerts = agents.reduce((sum, a) => sum + a.alerts.filter(al => al.severity === 'warning').length, 0);
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ agents, summary: { totalAlerts, criticalAlerts, warningAlerts } }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      console.error('[API] /api/operations error:', e.message);
+      res.end(JSON.stringify({ error: 'Failed to get operations data' }));
+    }
+    return;
+  }
+
   // ── Security Audit ──
   if (path === '/api/security-audit' && req.method === 'GET') {
     try {
@@ -1483,6 +1629,83 @@ const server = createServer((req, res) => {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       console.error('[API] /api/crons error:', e.message);
       res.end(JSON.stringify({ error: 'Failed to list cron jobs' }));
+    }
+    return;
+  }
+
+  if (path === '/api/crons' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > MAX_BODY_SIZE) { req.destroy(); return; } });
+    req.on('end', () => {
+      try {
+        const { agent, schedule, task, label } = JSON.parse(body);
+        
+        // Validate inputs
+        if (!agent || !schedule || !task || !label) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Missing required fields' }));
+          return;
+        }
+
+        // Sanitize inputs (no shell metacharacters)
+        const sanitize = (str) => {
+          if (typeof str !== 'string') return '';
+          // Only allow alphanumeric, spaces, dashes, underscores, colons, slashes, dots, commas
+          return str.replace(/[^a-zA-Z0-9\s\-_:\/\.,*]/g, '');
+        };
+
+        const safeAgent = sanitize(agent);
+        const safeSchedule = sanitize(schedule);
+        const safeLabel = sanitize(label);
+        // Task can have more characters but still sanitize dangerous ones
+        const safeTask = String(task).replace(/[$`\\]/g, '');
+
+        if (!safeAgent || !safeSchedule || !safeLabel || !safeTask) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Invalid characters in input' }));
+          return;
+        }
+
+        // Execute openclaw cron add
+        const openclawBin = join(process.execPath, '..', 'openclaw');
+        execFileSync(openclawBin, [
+          'cron', 'add',
+          '--agent', safeAgent,
+          '--schedule', safeSchedule,
+          '--task', safeTask,
+          '--label', safeLabel
+        ], { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, message: 'Cron job created' }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        console.error('[API] /api/crons POST error:', e.message);
+        res.end(JSON.stringify({ ok: false, error: 'Failed to create cron job' }));
+      }
+    });
+    return;
+  }
+
+  if (path.startsWith('/api/crons/') && req.method === 'DELETE') {
+    try {
+      const cronId = path.split('/')[3];
+      if (!cronId || !/^[a-zA-Z0-9\-_]+$/.test(cronId)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Invalid cron ID' }));
+        return;
+      }
+
+      // Execute openclaw cron remove
+      const openclawBin = join(process.execPath, '..', 'openclaw');
+      execFileSync(openclawBin, ['cron', 'remove', cronId], { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, message: 'Cron job deleted' }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      console.error('[API] /api/crons DELETE error:', e.message);
+      res.end(JSON.stringify({ ok: false, error: 'Failed to delete cron job' }));
     }
     return;
   }
@@ -1576,6 +1799,145 @@ const server = createServer((req, res) => {
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  // ── Agent Config ──
+  if (path.startsWith('/api/agents/') && path.endsWith('/config') && req.method === 'GET') {
+    const agentId = path.split('/')[3];
+    try {
+      const agentConfig = collector.config?.agents?.find(a => a.id === agentId);
+      if (!agentConfig) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Agent not found' }));
+        return;
+      }
+
+      const ws = agentConfig.workspace;
+      const homeDir = process.env.HOME || '/Users/openclaw';
+
+      // Read model from config.yaml
+      let model = null;
+      try {
+        const configPath = join(homeDir, '.openclaw', 'config.yaml');
+        if (existsSync(configPath)) {
+          const configContent = readFileSync(configPath, 'utf8');
+          // Simple YAML parsing for agents.<name>.model
+          const modelMatch = configContent.match(new RegExp(`agents:\\s*\\n\\s*${agentId}:\\s*\\n.*?model:\\s*["']?([^"'\\n]+)["']?`, 's'));
+          if (modelMatch) model = modelMatch[1];
+        }
+      } catch {}
+
+      // List skills (local + global user)
+      const readSkillsDir = (dir) => {
+        if (!existsSync(dir)) return [];
+        try {
+          return readdirSync(dir).filter(f => {
+            try { return statSync(join(dir, f)).isDirectory(); } catch { return false; }
+          });
+        } catch { return []; }
+      };
+
+      const localSkills = readSkillsDir(join(ws, 'skills'));
+      const globalSkills = readSkillsDir(join(homeDir, '.openclaw', 'skills'));
+      const allSkills = [...new Set([...localSkills, ...globalSkills])].sort();
+
+      // Read workspace files
+      const readFile = (name) => {
+        const p = join(ws, name);
+        if (!existsSync(p)) return '';
+        try { return readFileSync(p, 'utf8'); } catch { return ''; }
+      };
+
+      const files = {
+        'SOUL.md': readFile('SOUL.md'),
+        'AGENTS.md': readFile('AGENTS.md'),
+        'USER.md': readFile('USER.md'),
+        'TOOLS.md': readFile('TOOLS.md'),
+        'HEARTBEAT.md': readFile('HEARTBEAT.md'),
+        'MEMORY.md': readFile('MEMORY.md'),
+        'IDENTITY.md': readFile('IDENTITY.md'),
+        'ACTIVE_WORK.md': readFile('ACTIVE_WORK.md'),
+        'TASKS.md': readFile('TASKS.md'),
+      };
+
+      // memory/ directory listing
+      let memoryDir = [];
+      const memDirPath = join(ws, 'memory');
+      if (existsSync(memDirPath)) {
+        try {
+          memoryDir = readdirSync(memDirPath).filter(f => !f.startsWith('.')).map(f => {
+            const st = statSync(join(memDirPath, f));
+            return { name: f, size: st.size, modified: st.mtime.toISOString() };
+          }).sort((a, b) => b.modified.localeCompare(a.modified));
+        } catch {}
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ model, skills: allSkills, files, memoryDir }));
+    } catch (e) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      console.error('[API] /api/agents/:name/config GET error:', e.message);
+      res.end(JSON.stringify({ error: 'Failed to read config' }));
+    }
+    return;
+  }
+
+  if (path.startsWith('/api/agents/') && path.endsWith('/config') && req.method === 'PUT') {
+    const agentId = path.split('/')[3];
+    let body = '';
+    req.on('data', chunk => { body += chunk; if (body.length > MAX_BODY_SIZE) { req.destroy(); return; } });
+    req.on('end', () => {
+      try {
+        const { model, files } = JSON.parse(body);
+        
+        const agentConfig = collector.config?.agents?.find(a => a.id === agentId);
+        if (!agentConfig) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Agent not found' }));
+          return;
+        }
+
+        const ws = agentConfig.workspace;
+
+        // Update model via openclaw config set
+        if (model) {
+          const sanitizedModel = String(model).replace(/[^a-zA-Z0-9\-_\.\/]/g, '');
+          if (sanitizedModel) {
+            try {
+              const openclawBin = join(process.execPath, '..', 'openclaw');
+              execFileSync(openclawBin, ['config', 'set', `agents.${agentId}.model`, sanitizedModel], 
+                { encoding: 'utf8', stdio: 'pipe', timeout: 10000 });
+            } catch (e) {
+              console.error('[API] Failed to update model:', e.message);
+            }
+          }
+        }
+
+        // Update files
+        if (files && typeof files === 'object') {
+          const allowedFiles = ['SOUL.md', 'AGENTS.md', 'USER.md', 'TOOLS.md'];
+          for (const [name, content] of Object.entries(files)) {
+            if (!allowedFiles.includes(name)) continue;
+            if (typeof content !== 'string') continue;
+
+            const filePath = join(ws, name);
+            try {
+              writeFileSync(filePath, content, { encoding: 'utf8', mode: 0o644 });
+            } catch (e) {
+              console.error(`[API] Failed to write ${name}:`, e.message);
+            }
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, message: 'Configuration saved' }));
+      } catch (e) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        console.error('[API] /api/agents/:name/config PUT error:', e.message);
+        res.end(JSON.stringify({ ok: false, error: 'Failed to save config' }));
+      }
+    });
     return;
   }
 
